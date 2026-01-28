@@ -1,4 +1,5 @@
 import { db } from "@/lib/prisma";
+import redis from "@/lib/redis";
 import { auth } from "@clerk/nextjs/server";
 
 /**
@@ -6,12 +7,18 @@ import { auth } from "@clerk/nextjs/server";
  */
 export async function getPatientAppointments() {
   const { userId } = await auth();
-
+  
   if (!userId) {
     throw new Error("Unauthorized");
   }
-
+  
   try {
+    const cacheKey = `patient:appointments:${userId}`;
+    const cached = await redis.get(cacheKey);
+    if (cached) {
+      console.log("Doctors fetched from cache");
+      return { appointments: JSON.parse(cached), fromCache: true };
+    }
     const user = await db.user.findUnique({
       where: {
         clerkUserId: userId,
@@ -43,6 +50,9 @@ export async function getPatientAppointments() {
       orderBy: {
         startTime: "asc",
       },
+    });
+    await redis.set(cacheKey, JSON.stringify(appointments), {
+      EX: 300,
     });
 
     return { appointments };
